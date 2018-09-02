@@ -48,7 +48,7 @@ enum class TokenType {
     ELVIS,
 }
 
-class Tokenizer(private val source: String) {
+class Tokenizer(private val source: String, startLine: Int = 0, startCol: Int = 0) {
 
     private var index = 0
     private val current: Char
@@ -57,30 +57,34 @@ class Tokenizer(private val source: String) {
         get() = source.length > index
     private val next: Char
         get() = source[index + 1]
-    private var line: Int = 0
-    private var column: Int = 0
+    private var line: Int = startLine + 1
+    private var column: Int = startCol
     private val start: Triple<Int, Int, Int>
         get() = Triple(line, column, index)
 
     private val keywords = listOf(
-            "let",
-            "mut",
-            "func",
-            "for",
-            "while",
-            "break",
-            "continue",
-            "if",
-            "else",
-            "type",
-            "vararg",
-            "return",
-            "match",
-            "is",
-            "as",
-            "in",
-            "true",
-            "false"
+        "let",
+        "mut",
+        "func",
+        "for",
+        "while",
+        "break",
+        "continue",
+        "if",
+        "else",
+        "type",
+        "vararg",
+        "return",
+        "match",
+        "is",
+        "as",
+        "in",
+        "true",
+        "false",
+        "extern"
+    )
+    private val weakKeywords = listOf(
+        "Self"
     )
 
     private fun newLine() {
@@ -93,17 +97,30 @@ class Tokenizer(private val source: String) {
             i < 0 -> throw IllegalArgumentException("Can't back")
             i == 0 -> return
             else -> {
+                column++
                 val old = index
                 index += i
                 for (c in source.substring(old, minOf(index, source.length - 1))) {
                     if (c == '\n') {
                         newLine()
-                    } else {
-                        column++
                     }
                 }
             }
         }
+    }
+
+    fun tokens(): List<Token> {
+        var result: Token?
+        val tokens = mutableListOf<Token>()
+        while (true) {
+            result = next()
+            if (result != null) {
+                tokens += result
+            } else {
+                break
+            }
+        }
+        return tokens
     }
 
     fun next(): Token? {
@@ -159,12 +176,11 @@ class Tokenizer(private val source: String) {
                                 skip()
                             }
                             return Token(
-                                    comment.toString().trimIndent(),
-                                    TokenType.BLOCK_COMMENT,
-                                    sl..line,
-                                    sc..column,
-                                    si
+                                comment.toString().trimIndent(), TokenType.BLOCK_COMMENT, sl..line, sc..column, si
                             )
+                        }
+                        '=' -> {
+                            str(TokenType.ASSIGN, "$current$next")
                         }
                         else -> str(TokenType.OPERATOR)
                     }
@@ -206,7 +222,7 @@ class Tokenizer(private val source: String) {
     private fun nextIdentifier(): Token? {
         val result = StringBuilder()
         val (sl, sc, si) = start
-        while (hasNext && current !in "0123456789-+*%!/()[]{}:.,=;?\"' \t\r\n") {
+        while (hasNext && current !in "-+*%!/()[]{}:.,=;?\"' \t\r\n") {
             result.append(current)
             skip()
         }
@@ -214,11 +230,11 @@ class Tokenizer(private val source: String) {
             return null
         }
         return Token(
-                result.toString(),
-                if (result.toString() in keywords) TokenType.KEYWORD else TokenType.IDENTIFIER,
-                sl..line,
-                sc..column,
-                si
+            result.toString(), when (result.toString()) {
+                in keywords -> TokenType.KEYWORD
+                in weakKeywords -> TokenType.WEAK_KEYWORD
+                else -> TokenType.IDENTIFIER
+            }, sl..line, sc..column, si
         )
     }
 
@@ -261,6 +277,8 @@ class Tokenizer(private val source: String) {
                 } else {
                     tokenizeError("Unescapeable sequence found at line $line, column $column", index)
                 }
+            } else if (current == '\n') {
+                tokenizeError("Line feed found in string at line $line, column $column", index)
             } else {
                 backslash = false
                 result.append(current)
@@ -282,7 +300,7 @@ class Tokenizer(private val source: String) {
             val result = nextNumber()
             if (result.data.length > 1 && result.type == TokenType.INTEGER) {
                 tokenizeError(
-                        "Not allowed octal number found at line ${result.line}, column ${result.column.start}", si
+                    "Not allowed octal number found at line ${result.line}, column ${result.column.start}", si
                 )
             }
             result
@@ -332,7 +350,7 @@ class Tokenizer(private val source: String) {
 
     private fun tokenizeError(reason: String, index: Int = this.index): NodeNothing {
         throw IllegalStateException(
-                "$reason\n\nSource code is here :\n${source.where(index)}"
+            "$reason\n\nSource code is here :\n${source.where(index)}"
         )
     }
 }

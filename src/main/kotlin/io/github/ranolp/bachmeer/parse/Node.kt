@@ -6,7 +6,6 @@ import io.github.ranolp.bachmeer.util.times
 import java.lang.StringBuilder
 
 sealed class INode(val name: String) {
-    open val data: Map<String, Any?> = emptyMap()
     abstract fun debug(depth: Int = 0, step: Int = 2): String
 
     abstract fun getType(compiler: Compiler): Type
@@ -24,13 +23,7 @@ abstract class Node(name: String, val tokenStart: Token, val tokenEnd: Token, va
     override fun debug(depth: Int, step: Int): String {
         val print = StringBuilder(" " * depth + name)
         print.append('(')
-        if (data.isNotEmpty()) {
-            print.append("data={").append(data.entries.joinToString(", ") {
-                "${it.key}=${it.value}"
-            }).append('}')
-            print.append(", ")
-        }
-        print.append("tokenStart={line=").append(tokenStart.line.start + 1).append(", column=")
+        print.append("tokenStart={line=").append(tokenStart.line.start).append(", column=")
                 .append(tokenStart.column.start).append("}, tokenEnd={line=").append(tokenEnd.line.endInclusive)
                 .append(", column=").append(tokenEnd.column.endInclusive).append("})")
         children.forEach { print.append('\n').append(it.debug(depth + step, step)) }
@@ -39,7 +32,7 @@ abstract class Node(name: String, val tokenStart: Token, val tokenEnd: Token, va
 }
 
 class RootNode(tokenStart: Token, tokenEnd: Token, statements: List<StatementNode>) : Node(
-        "<ROOT>", tokenStart, tokenEnd, statements
+    "<ROOT>", tokenStart, tokenEnd, statements
 ) {
     override fun getType(compiler: Compiler): Type {
         return Type.VOID
@@ -47,7 +40,7 @@ class RootNode(tokenStart: Token, tokenEnd: Token, statements: List<StatementNod
 }
 
 abstract class StatementNode(name: String, tokenStart: Token, tokenEnd: Token, children: List<Node>) : Node(
-        name, tokenStart, tokenEnd, children
+    name, tokenStart, tokenEnd, children
 ) {
     override fun getType(compiler: Compiler): Type {
         return Type.VOID
@@ -55,7 +48,7 @@ abstract class StatementNode(name: String, tokenStart: Token, tokenEnd: Token, c
 }
 
 class ExpressionStatementNode(semicolon: Token, val expression: ExpressionNode) : StatementNode(
-        "Expression Statement", expression.tokenStart, semicolon, listOf(expression)
+    "Expression Statement", expression.tokenStart, semicolon, listOf(expression)
 ) {
     override fun getType(compiler: Compiler): Type {
         return expression.getType(compiler)
@@ -63,23 +56,36 @@ class ExpressionStatementNode(semicolon: Token, val expression: ExpressionNode) 
 }
 
 abstract class ExpressionNode(name: String, tokenStart: Token, tokenEnd: Token, children: List<Node>) : Node(
-        name, tokenStart, tokenEnd, children
+    name, tokenStart, tokenEnd, children
 )
 
-class AssignNode(val variableName: String, val expression: ExpressionNode, tokenStart: Token, tokenEnd: Token) :
-        StatementNode("Assign", tokenStart, tokenEnd, listOf(expression)) {
-    override val data: Map<String, Any?> = mapOf("variable-name" to variableName)
+class AssignNode(val variableName: String,
+        val expression: ExpressionNode,
+        val assignType: AssignType,
+        tokenStart: Token,
+        tokenEnd: Token
+) : StatementNode("Assign", tokenStart, tokenEnd, listOf(expression)) {
+    enum class AssignType {
+        ADD_ASSIGN,
+        SUBTRACT_ASSIGN,
+        MULTIPLY_ASSIGN,
+        DIVIDE_ASSIGN,
+        REMAINDER_ASSIGN,
+        SIMPLE_ASSIGN
+    }
 }
 
-class VarDeclNode(val variableName: String, val modifiers: Set<String>, val expression: ExpressionNode,
-        tokenStart: Token, tokenEnd: Token) : StatementNode(
-        "Variable Declaration", tokenStart, tokenEnd, listOf(expression)
-) {
-    override val data: Map<String, Any?> = mapOf("variable-name" to variableName, "modifiers" to modifiers)
-}
+class VarDeclNode(val variableName: String,
+        val modifiers: Set<String>,
+        val expression: ExpressionNode,
+        tokenStart: Token,
+        tokenEnd: Token
+) : StatementNode(
+    "Variable Declaration", tokenStart, tokenEnd, listOf(expression)
+)
 
 abstract class LiteralNode(name: String, token: Token) : ExpressionNode(
-        name, token, token, emptyList()
+    name, token, token, emptyList()
 )
 
 class IntegerNode(token: Token) : LiteralNode("Integer", token) {
@@ -103,8 +109,19 @@ class StringNode(token: Token) : LiteralNode("String", token) {
     }
 }
 
-class TemplateNode(token: Token) : LiteralNode("Template", token) {
-    val value: String = token.data
+class VariableNode(token: Token) : LiteralNode("Variable", token) {
+    val variableName: String = token.data
+    override fun getType(compiler: Compiler): Type {
+        return Type.UNKNOWN
+    }
+}
+
+class TemplateNode(token: Token, val datas: List<Data>) : LiteralNode("Template", token) {
+    sealed class Data {
+        class Str(val value: String) : Data()
+        class Expr(val node: ExpressionNode) : Data()
+    }
+
     override fun getType(compiler: Compiler): Type {
         return Type.STRING
     }
@@ -112,7 +129,6 @@ class TemplateNode(token: Token) : LiteralNode("Template", token) {
 
 class FuncCallNode(val functionName: String, val params: List<ExpressionNode>, tokenStart: Token, tokenEnd: Token) :
         ExpressionNode("Function Call", tokenStart, tokenEnd, params) {
-    override val data: Map<String, Any?> = mapOf("function-name" to functionName)
     override fun getType(compiler: Compiler): Type {
         return Type.UNKNOWN
     }

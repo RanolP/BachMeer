@@ -4,19 +4,21 @@ import io.github.ranolp.bachmeer.compile.BatchCompiler
 import io.github.ranolp.bachmeer.parse.Parser
 import io.github.ranolp.bachmeer.parse.Token
 import io.github.ranolp.bachmeer.parse.Tokenizer
+import java.nio.file.Files
+import java.nio.file.Paths
 import kotlin.test.Test
 
 class TokenizerTest {
     @Test
     fun yeah() {
         val code = """
-            let mut age = 0xCAFE_DEAD;
+            let mut age = 0x1_DEAD;
             let name = 'Ranol';
-            print(`My name is ${'$'}{name}`);
-            print(`My age is ${'$'}{age}`);
-            print('Oh, It was joke ;)');
+            println(`My name is ${'$'}{name}`);
+            println(`My age is ${'$'}{age}`);
+            println('Oh, It was joke ;)');
             age = 1 4;
-            print(`My real age is ${'$'}{age}`);
+            println(`My real age is ${'$'}{age}`);
         """.trimIndent()
 
         println("--------------- ORIGINAL CODE ---------------")
@@ -31,14 +33,14 @@ class TokenizerTest {
 
         var result: Token?
         val tokens = mutableListOf<Token>()
-        do {
+        while(true) {
             result = tokenizer.next()
             if (result != null) {
                 tokens += result
             } else {
                 break
             }
-        } while (true)
+        }
 
         // tokens.forEach(::println)
 
@@ -46,14 +48,16 @@ class TokenizerTest {
 
         // println(root.debug())
 
-        val compiled = BatchCompiler(root).compile().toString()
+        val compiled = BatchCompiler(root).compile().toString(Charsets.UTF_8)
 
         println("--------------- COMPILED CODE ---------------")
         val compiledCodes = compiled.split("\n")
         val compiledLinePad = compiledCodes.size.toString().length
-        compiled.forEachIndexed { i, str ->
+        compiledCodes.forEachIndexed { i, str ->
             println("${(i + 1).toString().padStart(compiledLinePad, ' ')} | $str")
         }
         println("---------------------------------------------")
+
+        Files.write(Paths.get("compiled.bat"), compiled.toByteArray(Charsets.ISO_8859_1))
     }
 }

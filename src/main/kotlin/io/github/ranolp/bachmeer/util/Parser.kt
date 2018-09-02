@@ -3,7 +3,7 @@ package io.github.ranolp.bachmeer.util
 import io.github.ranolp.bachmeer.parse.Token
 
 fun String.where(start: Token, where: Token, range: IntRange = where.column): String {
-    return where(start.line.start + 1, start.column.start, range)
+    return where(start.line.start, start.column.start, range)
 }
 
 fun String.where(line: Int, col: Int, capture: IntRange? = null): String {
@@ -31,5 +31,7 @@ fun String.where(line: Int, col: Int, capture: IntRange? = null): String {
 
 
 fun String.where(start: Int): String {
-    return substring(start, indexOf('\n', start).let { if (it < 0) length else it })
+    val linefeed = indexOf('\n', start)
+    val before = lastIndexOf('\n', linefeed - 1)
+    return substring(maxOf(before, 0), if(linefeed < 0) length else linefeed)
 }

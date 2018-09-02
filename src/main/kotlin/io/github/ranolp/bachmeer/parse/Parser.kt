@@ -2,7 +2,11 @@ package io.github.ranolp.bachmeer.parse
 
 import io.github.ranolp.bachmeer.util.where
 
-data class ParseStatement(private val source: String?, var index: Int, var tokens: List<Token>) {
+data class ParseStatement(internal val source: String?,
+        var index: Int,
+        var tokens: List<Token>,
+        private val parent: Pair<ParseStatement, Int>? = null
+) {
     val hasCurrent: Boolean
         get() = available(index)
     val current: Token
@@ -37,17 +41,17 @@ data class ParseStatement(private val source: String?, var index: Int, var token
         if (!hasCurrent || current.data != ";") {
             if (!hasCurrent) {
                 parseError(
-                        from,
-                        "Semicolon expected",
-                        tokens[index - 1],
-                        (tokens[index - 1].column.endInclusive + 1)..(tokens[index - 1].column.endInclusive + 2)
+                    from,
+                    "Semicolon expected",
+                    tokens[index - 1],
+                    (tokens[index - 1].column.endInclusive + 1)..(tokens[index - 1].column.endInclusive + 2)
                 )
             } else if (tokens[index - 1].line.endInclusive != current.line.start) {
                 parseError(
-                        from,
-                        "Semicolon expected",
-                        tokens[index - 1],
-                        (tokens[index - 1].column.endInclusive)..(tokens[index - 1].column.endInclusive + 1)
+                    from,
+                    "Semicolon expected",
+                    tokens[index - 1],
+                    (tokens[index - 1].column.endInclusive)..(tokens[index - 1].column.endInclusive + 1)
                 )
             } else {
                 parseError(from, "Semicolon expected")
@@ -58,16 +62,25 @@ data class ParseStatement(private val source: String?, var index: Int, var token
         return result
     }
 
-    fun parseError(from: Int, message: String, customToken: Token? = null, customRange: IntRange? = null): Nothing {
-        val start = tokens[from]
-        val target = customToken ?: this.lastRead
-        throw IllegalStateException(
-                "$message, line=${target.line.start + 1}, column=${target.column.start}" + if (source !== null) {
+    fun parseError(from: Int,
+            message: String,
+            customToken: Token? = null,
+            customRange: IntRange? = null,
+            index: Int = 0
+    ): Nothing {
+        if (parent != null) {
+            parent.first.parseError(from, message, customToken, customRange, index + parent.second)
+        } else {
+            val start = tokens[from]
+            val target = customToken ?: this.lastRead
+            throw IllegalStateException(
+                "$message, line=${target.line.start}, column=${target.column.start}" + if (source !== null) {
                     "\n\n" + source.where(start, target, customRange ?: target.column)
                 } else {
                     ""
                 }
-        )
+            )
+        }
     }
 
 }
@@ -80,14 +93,13 @@ class Parser(tokens: List<Token>, source: String? = null) {
 
 typealias Explicit<T> = ParseStatement.() -> T
 
-private inline fun <T : INode?> parse(noinline body: ParseStatement.() -> T): ParseStatement.() -> T? = {
+private fun <T : INode?> parse(body: ParseStatement.() -> T): ParseStatement.() -> T? = {
     if (hasCurrent) {
         body()
     } else {
         null
     }
 }
-
 
 val root = parse {
     val children = mutableListOf<StatementNode>()
@@ -118,18 +130,18 @@ val statement = parse {
         }
         TokenType.IDENTIFIER -> {
             if (!hasNext) {
-                if (tokens[index - 1].line.endInclusive != current.line.start) {
+                if (index > 0 && tokens[index - 1].line.endInclusive != current.line.start) {
                     parseError(
-                            from,
-                            "Semicolon expected",
-                            tokens[index - 1],
-                            (tokens[index - 1].column.endInclusive)..(tokens[index - 1].column.endInclusive + 1)
+                        from,
+                        "Semicolon expected",
+                        tokens[index - 1],
+                        (tokens[index - 1].column.endInclusive)..(tokens[index - 1].column.endInclusive + 1)
                     )
                 } else {
                     parseError(from, "Semicolon expected")
                 }
             } else when (next!!.type) {
-                TokenType.ASSIGN -> assignStatement()
+                TokenType.ASSIGN -> assign()
                 else -> null
             }
         }
@@ -150,15 +162,23 @@ val statement = parse {
     } ?: parseError(index, "Not parsable token received")
 }
 
-val assignStatement = parse {
+val assign = parse {
     val from = index
     val identifier = require(
-            from, "Identifier Expected"
+        from, "Identifier Expected"
     ) { type == TokenType.IDENTIFIER || type == TokenType.WEAK_KEYWORD }
-    require(from, "Assign operator expected") { type == TokenType.ASSIGN }
+    val operator = require(from, "Assign operator expected") { type == TokenType.ASSIGN }
     val expr = expression() ?: parseError(from, "Expression expected")
     val semicolon = semicolon(from)
-    AssignNode(identifier.data, expr, identifier, semicolon)
+    val assignType = when (operator.data) {
+        "+=" -> AssignNode.AssignType.ADD_ASSIGN
+        "-=" -> AssignNode.AssignType.SUBTRACT_ASSIGN
+        "*=" -> AssignNode.AssignType.MULTIPLY_ASSIGN
+        "/=" -> AssignNode.AssignType.DIVIDE_ASSIGN
+        "%=" -> AssignNode.AssignType.REMAINDER_ASSIGN
+        else -> AssignNode.AssignType.SIMPLE_ASSIGN
+    }
+    AssignNode(identifier.data, expr, assignType, identifier, semicolon)
 }
 
 val varDecl = parse {
@@ -168,7 +188,7 @@ val varDecl = parse {
     while (current.type == TokenType.KEYWORD) {
         when (current.data) {
             "mut" -> {
-                if("mutable" in modifiers) {
+                if ("mutable" in modifiers) {
                     parseError(from, "Duplicated modifier found")
                 }
                 modifiers += "mutable"
@@ -178,18 +198,28 @@ val varDecl = parse {
         skip()
     }
     val identifier = require(
-            from, "Identifier Expected"
+        from, "Identifier Expected"
     ) { type == TokenType.IDENTIFIER || type == TokenType.WEAK_KEYWORD }
     require(from, "Assign operator expected") { data == "=" }
     val expression = expression() ?: parseError(from, "Expression expected")
     val semicolon = semicolon(from)
     VarDeclNode(
-            identifier.data, modifiers, expression, let, semicolon
+        identifier.data, modifiers, expression, let, semicolon
     )
 }
 
 val expression: Explicit<ExpressionNode?> = parse {
-    literal() ?: functionCall()
+    when (current.type) {
+        TokenType.IDENTIFIER, TokenType.WEAK_KEYWORD -> {
+            next?.type?.let {
+                when (it) {
+                    TokenType.LPAREN -> functionCall()
+                    else -> null
+                }
+            } ?: variable()
+        }
+        else -> literal()
+    }
 }
 
 val literal = parse {
@@ -216,7 +246,63 @@ val string = parse {
 
 val template = parse {
     require { type == TokenType.TEMPLATE }?.let {
-        TemplateNode(it)
+        val data = mutableListOf<TemplateNode.Data>()
+
+        var escape = false
+        var dollar = false
+        var capture = true
+
+        val builder = StringBuilder()
+
+        loop@ for ((i, c) in it.data.withIndex()) {
+            when (c) {
+                '\\' -> escape = true
+                '$' -> {
+                    if (!escape) {
+                        dollar = true
+                        escape = false
+                    }
+                }
+                '{' -> {
+                    if (dollar) {
+                        dollar = false
+                        capture = true
+                        builder.setLength(builder.length - 1)
+                        data += TemplateNode.Data.Str(builder.toString())
+                        builder.setLength(0)
+                        continue@loop
+                    }
+                }
+                '}' -> {
+                    if (capture) {
+                        val tokens = Tokenizer(
+                            builder.toString(), it.line.start - 1, it.column.start + i - builder.length + 1
+                        ).tokens()
+                        val statement = ParseStatement(
+                            source, 0, tokens, Pair(this, it.index)
+                        )
+                        val expr = statement.expression()
+                        if (statement.hasCurrent) {
+                            parseError(
+                                index - 1, "Expect one expression, but more expression received", statement.current
+                            )
+                        }
+                        data += TemplateNode.Data.Expr(
+                            expr ?: parseError(
+                                index - 1,
+                                "Expression expected",
+                                customRange = (it.column.start + i - 1)..(it.column.start + i + 2)
+                            )
+                        )
+                        builder.setLength(0)
+                        continue@loop
+                    }
+                }
+            }
+            builder.append(c)
+        }
+
+        TemplateNode(it, data)
     }
 }
 
@@ -230,4 +316,10 @@ val functionCall = parse {
     }
     val end = require(from) { type == TokenType.RPAREN }
     FuncCallNode(identifier.data, params, identifier, end)
+}
+
+val variable = parse {
+    require { type == TokenType.IDENTIFIER || type == TokenType.WEAK_KEYWORD }?.let {
+        VariableNode(it)
+    }
 }
