@@ -2,7 +2,11 @@
 
 BachMeer: Shell Script Redefined
 
-# Features
+## How to read?
+
+Pronounce /bɑːxmeːɐ̯/
+
+## Features
 
  * Compile BachMeer script into batch, bash script
  * File bundling
