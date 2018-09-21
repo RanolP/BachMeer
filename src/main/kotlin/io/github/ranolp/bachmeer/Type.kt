@@ -7,5 +7,6 @@ enum class Type {
     ARRAY,
     OBJECT,
     UNKNOWN,
+    FUNCTION,
     VOID
 }

@@ -1,0 +1,9 @@
+let simple = 0;
+let mut mutable = 'str';
+let typed: Int = 2;
+let mut mutable_typed: Int = 888;
+
+mutable = 1;
+mutable_typed = 3;
+
+println(`${simple} - ${mutable} - ${typed} - ${mutable_typed}`);

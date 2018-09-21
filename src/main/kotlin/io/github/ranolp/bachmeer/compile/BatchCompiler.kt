@@ -1,114 +1,113 @@
 package io.github.ranolp.bachmeer.compile
 
 import io.github.ranolp.bachmeer.Type
+import io.github.ranolp.bachmeer.compile.data.BMFunction
+import io.github.ranolp.bachmeer.compile.data.BMFunctionInCode
+import io.github.ranolp.bachmeer.compile.data.BMInteger
+import io.github.ranolp.bachmeer.compile.data.BMString
+import io.github.ranolp.bachmeer.compile.data.BMTemplate
+import io.github.ranolp.bachmeer.compile.data.BMVariable
+import io.github.ranolp.bachmeer.compile.data.CompileResult
 import io.github.ranolp.bachmeer.parse.AssignNode
 import io.github.ranolp.bachmeer.parse.ExpressionNode
 import io.github.ranolp.bachmeer.parse.ExpressionStatementNode
 import io.github.ranolp.bachmeer.parse.FuncCallNode
+import io.github.ranolp.bachmeer.parse.FuncDeclNode
 import io.github.ranolp.bachmeer.parse.IntegerNode
 import io.github.ranolp.bachmeer.parse.Node
 import io.github.ranolp.bachmeer.parse.StringNode
 import io.github.ranolp.bachmeer.parse.TemplateNode
 import io.github.ranolp.bachmeer.parse.VarDeclNode
 import io.github.ranolp.bachmeer.parse.VariableNode
+import io.github.ranolp.bachmeer.platform.Platform
 import java.util.*
 
-class BatchCompiler(root: Node) : Compiler(root) {
-    private var nameId = 0
-    private val names = mutableListOf<String>()
+class BatchCompiler(compilerOption: CompilerOption = CompilerOption.DEFAULT) : Compiler(
+    Platform.BATCH, compilerOption
+) {
 
-    override fun compile(): ByteArray {
+    override fun compile(parentNode: Node, root: Boolean): String {
         val result = StringJoiner("\n")
-        result.add(":: Auto generated code by BachMeer ::")
-        result.add("@echo off")
-        for (node in root.children) {
-            result.add(compile(node))
+        if (root) {
+            result.add(":: Auto generated code by BachMeer ::")
+            result.add("@echo off")
         }
-        return result.toString().toByteArray()
-    }
 
-    private fun compile(node: Node): String {
-        return when (node) {
-            is VarDeclNode -> varDecl(node)
-            is ExpressionStatementNode -> compile(node.expression)
-            is FuncCallNode -> funcCall(node)
-            is AssignNode -> assign(node)
-            else -> notImplemented(node)
-        }
-    }
-
-    private fun evaluateExpression(node: ExpressionNode): Pair<String, String> {
-        val name by lazy {
-            "_${nameId++}"
-        }
-        return when (node) {
-            is IntegerNode -> Pair("", node.value.toString())
-            is StringNode -> Pair("", node.value)
-            is TemplateNode -> {
-                val code = node.datas.map {
-                    when (it) {
-                        is TemplateNode.Data.Str -> Pair("", it.value)
-                        is TemplateNode.Data.Expr -> evaluateExpression(it.node)
-                    }
-                }.reduce { l, r ->
-                    Pair(l.first + r.first, l.second + r.second)
-                }.let {
-                    it.first + "set \"$name=${it.second}\"\n"
+        for (node in parentNode.children) {
+            val compiled = when (node) {
+                is VarDeclNode -> varDecl(node)
+                is ExpressionStatementNode -> compile(node, false)
+                is FuncCallNode -> funcCall(node).asCode(this)
+                is FuncDeclNode -> funcDecl(node)
+                is AssignNode -> assign(node)
+                else -> notImplemented(node)
+            }.split("\n")
+            compiled.forEach {
+                if (!it.isEmpty()) {
+                    result.add(it)
                 }
+            }
+        }
+        return result.toString()
+    }
 
-                Pair(code, "%$name%")
-            }
-            is VariableNode -> {
-                Pair("", "%${node.variableName}%")
-            }
+    override fun evaluateExpression(node: ExpressionNode): CompileResult.Data {
+        return when (node) {
+            is IntegerNode -> CompileResult.Data(BMInteger(node.value))
+            is StringNode -> CompileResult.Data(BMString(node.value))
+            is TemplateNode -> CompileResult.Data(BMTemplate(node))
+            is VariableNode -> CompileResult.Data(BMVariable(node.variableName))
+            is FuncCallNode -> funcCall(node)
+
             else -> notImplemented(node)
         }
     }
 
     private fun varDecl(node: VarDeclNode): String {
-        return _assign(node.variableName, node.expression)
+        return _assign(node.identifier.accessName.data, node.expression, "mutable" !in node.modifiers, false)
     }
 
-    private fun funcCall(node: FuncCallNode): String {
-        val params = node.params
-        fun paramCount(functionName: String, expected: Int, actual: Int) {
-            throw IllegalArgumentException("function $functionName expects $expected parameters, but $actual parameters received")
-        }
-        when (node.functionName) {
-            "println" -> {
-                if (params.size != 1) {
-                    paramCount("println", 1, params.size)
+    private fun funcCall(node: FuncCallNode): CompileResult.Data {
+        val name = node.functionName
+        when (name) {
+            in context -> {
+                val value = context[name]
+                val real = value?.real as? BMFunction ?: error(
+                    "Expect `$name` is function. but it's ${value?.type ?: Type.UNKNOWN}"
+                )
+                val evaluated = node.params.map { evaluateExpression(it) }
+                return real.invoke(this, *evaluated.map { it.bmObject }.toTypedArray()).let {
+                    it.withPreCode(evaluated.joinToString("\n") { it.preCode })
                 }
-                val evaluated = evaluateExpression(params[0])
-
-                return evaluated.first + "echo ${evaluated.second}"
             }
         }
-        notImplemented(node)
+        throw IllegalStateException("Function $name is not found.")
     }
 
     private fun assign(node: AssignNode): String {
         return when (node.assignType) {
             AssignNode.AssignType.SIMPLE_ASSIGN -> {
-                _assign(node.variableName, node.expression)
+                _assign(node.variableName, node.expression, false, true)
             }
             else -> notImplemented(node)
         }
     }
 
-    private fun _assign(name: String, node: ExpressionNode): String {
+    private fun _assign(name: String, node: ExpressionNode, immutable: Boolean, ignoreDuplicate: Boolean): String {
         val evaluated = evaluateExpression(node)
-        return evaluated.first + when (node) {
+        context.set(name, evaluated.bmObject, immutable, ignoreDuplicate)
+        val compiled = evaluated.compile(this)
+        return compiled.preCode + when (node) {
             is IntegerNode -> {
-                "set /a $name=${evaluated.second}"
+                "::BMA_Type=Int\nset /a $name=${compiled.code}"
             }
             is StringNode -> {
-                "set \"$name=${evaluated.second}\""
+                "::BMA_Type=String\nset \"$name=${compiled.code}\""
             }
             else -> {
                 when (node.getType(this)) {
                     Type.INTEGER -> {
-                        "set /a $name=${evaluated.second}"
+                        "::BMA_Type=Int\nset /a $name=${compiled.code}"
                     }
                     Type.DECIMAL -> notImplemented(node)
                     Type.STRING -> notImplemented(node)
@@ -116,9 +115,16 @@ class BatchCompiler(root: Node) : Compiler(root) {
                     Type.OBJECT -> notImplemented(node)
                     Type.UNKNOWN -> notImplemented(node)
                     Type.VOID -> notImplemented(node)
+                    Type.FUNCTION -> notImplemented(node)
                 }
             }
         }
+    }
+
+    private fun funcDecl(funcDeclNode: FuncDeclNode): String {
+        val func = BMFunctionInCode(funcDeclNode)
+        context.set(funcDeclNode.functionName, func, true, false)
+        return func.compile(this).asCode(this)
     }
 
     private fun notImplemented(node: Node): Nothing {

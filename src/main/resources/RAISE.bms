@@ -1,5 +1,9 @@
 let VERSION = '0.1.0-SNAPSHOT';
 
+let BORDER_HEAD = '┌─────────────────────────────────────────────────────────────────────';
+let BORDER_ = '┌─────────────────────────────────────────────────────────────────────';
+let BORDER_TAIL = '└─────────────────────────────────────────────────────────────────────';
+
 let mut java = 'java';
 let bit = 
   if exists(env('%ProgramFiles(x86)')) {
@@ -67,115 +71,98 @@ if !exists(jarFile) (
   )
   configureJar();
 )
-
 println(`INFO  Jar file  : ${jarFile}`);
+
 if !ram (
   println('INFO  RAM not configured.');
   configureRam();
 )
-
 println(`INFO  RAM       : ${ram} GB`);
+
 if !exists(javaPath) (
   println('INFO  Java not configured.');
   configureJava();
 )
+println(`INFO  Java      : ${javaPath}`);
 
-println(`INFO  Java      : ${ava_path}`);
-if java_args (
-  println(`INFO  Java Args : ${java_path}`);
+if javaArgs (
+  println(`INFO  Java Args : ${javaArgs}`);
 )
 menu();
 
-:ConfigureJar
-setlocal EnableDelayedExpansion
-echo ┌─────────────────────────────────────────────────────────────────────
-echo │ Select one of following jar files.
-echo ├─────────────────────────────────────────────────────────────────────
-for /f "tokens=*" %%a in ('dir /B /O') do (
-	set temp_file=%%a
-	if "!temp_file:~-4!" == ".jar" (
-		echo │ !temp_file!
-	)
-)
-echo └─────────────────────────────────────────────────────────────────────
-call :Loop-ConfigureJar
-endlocal
+func configureJar() {
+    println(BORDER_HEAD);
+    println('│ Select one of following jar files.');
+    println(BORDER_TAIL);
+    for file in listFiles().filter(\file -> file.extension == 'jar') {
+        println(`│ ${file.name}`);
+    }
 
-:Loop-ConfigureJar
-setlocal EnableDelayedExpansion
-set /p "jar_file=Type a name of file > "
+    while(true) {
+        let name = input('Type a name of file > ');
 
-if not exist "!jar_file!" (
-	echo WARN  Please type existing file.
-	goto Loop-ConfigureJar
-)
-if not "!jar_file:~-4!" == ".jar" (
-	echo WARN  Please type a jar file.
-	goto Loop-ConfigureJar
-)
-echo INFO  Jar file selected.
-echo INFO  Save the setting...
-call :Save
-endlocal
+        if !exists(`./$name`) {
+	        println('WARN  Please type existing file.');
+        } else if name[:4] != .jar {
+            println('WARN  Please type a jar file.');
+        } else {
+            println('INFO  Jar file selected.');
+            println('INFO  Save the setting...');
 
-:ConfigureRam
-setlocal EnableDelayedExpansion
-echo ┌─────────────────────────────────────────────────────────────────────
-echo │ Configure RAM
-echo ├─────────────────────────────────────────────────────────────────────
-echo │ 
+            jarFile = name;
 
-set /a count=0
-for /f %%L in ('wmic computersystem GET TotalPhysicalMemory') do (
-	set /a count=count+1
-	
-	set "line=%%L"
-	set "line=!line:*:=!"
+            save();
 
-	if !count! == 2 if defined line (
-		set "temp_ram="&for /f "delims=0123456789" %%i in ("!line!") do set temp_ram=%%i
-		if defined !temp_ram! (
-			echo │ Your Physical RAM : Unknown
-			set /a physical_ram=-1
-		) else (
-			set /a "physical_ram=!line:~0,-9!"
-			
-			echo │ Your Physical RAM : About !physical_ram! GB
-		)
-	)
-)
-echo │ 
-if !physical_ram! gtr 0 (
-	echo │ Enter that you want to use physical RAM less than !physical_ram! GB
-) else (
-	echo │ Enter that you want to use physical RAM.
-)
-echo └─────────────────────────────────────────────────────────────────────
-call :Loop-ConfigureRam
-endlocal
- 
-:Loop-ConfigureRam
-setlocal EnableDelayedExpansion
-set /p "temp_ram=Type a RAM value > "
-set "temp_ram2="&for /f "delims=0123456789" %%i in ("%temp_ram%") do set temp_ram2=%%i
-if defined temp_ram2 (
-	echo WARN  Please type a numeric characters.
-	goto Loop-ConfigureRam
-)
-set /a temp_ram=temp_ram
-if !physical_ram! gtr 0 if %temp_ram% gtr !physical_ram! (
-	echo WARN  Please type a valid value, maximum : !physical_ram! GB
-	goto Loop-ConfigureRam
-)
-if %temp_ram% leq 0 (
-	echo WARN  Please type a valid value, minimum : 1 GB
-	goto Loop-ConfigureRam
-)
-set /a ram=%temp_ram%
-echo INFO  RAM configured.
-call :Save
-endlocal
+            break;
+        }
+    }
+}
 
+func configureRam() {
+    println(BORDER_HEAD);
+    println('│ Configure RAM');
+    println(BORDER_TAIL);
+
+    let physicalRam = static if batch {
+        (raw('wmic computersystem GET TotalPhysicalMemory') as Int).split('\n')[1]
+    } else {
+        None
+    }
+
+    if physicalRam {
+        println(`│ Your Physical RAM : About ${physical_ram} GB`);
+    } else {
+        println(`│ Your Physical RAM : Unknown`);
+    }
+
+    println('│')
+    if physicalRam {
+	    println(`│ Enter that you want to use physical RAM less than ${physical_ram} GB`);
+    } else {
+        println(' Enter that you want to use physical RAM.');
+    }
+
+    while(true) {
+        let ramInput = input('Type a name of file > ').filter(\it -> it.isNumeric())?.map(\it -> it.toInt());
+
+        if !ramInput {
+            println('WARN  Please type a numeric characters.');
+        } else physicalRam && ramInput > physicalRam {
+            println(`WARN  Please type a valid value, maximum : ${physicalRam} GB`);
+        } else if ramInput <= 0 {
+            println(`WARN  Please type a valid value, minimum : 1 GB`);
+        } else {
+            ram = ramInput;
+            println('INFO  RAM configured.');
+            save();
+        }
+    }
+}
+
+func configureJava() {
+    println(BORDER_HEAD);
+    println(BORDER_TAIL);
+}
 :ConfigureJava
 setlocal EnableDelayedExpansion
 echo ┌─────────────────────────────────────────────────────────────────────

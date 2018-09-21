@@ -3,7 +3,6 @@ package io.github.ranolp.bachmeer.parse
 import io.github.ranolp.bachmeer.Type
 import io.github.ranolp.bachmeer.compile.Compiler
 import io.github.ranolp.bachmeer.util.times
-import java.lang.StringBuilder
 
 sealed class INode(val name: String) {
     abstract fun debug(depth: Int = 0, step: Int = 2): String
@@ -55,6 +54,28 @@ class ExpressionStatementNode(semicolon: Token, val expression: ExpressionNode) 
     }
 }
 
+class TypedIdentifier(val accessName: Token, val type: TypeNode?) : Node(
+    "Typed", accessName, type?.tokenEnd ?: accessName, if (type != null) listOf(type) else emptyList()
+) {
+    override fun getType(compiler: Compiler): Type = Type.UNKNOWN
+}
+
+class TypeNode(val type: List<Token>) : Node("TypedIdentifier", type.first(), type.last(), emptyList()) {
+    companion object {
+        val VOID = TypeNode(listOf(Token("NoType", TokenType.IDENTIFIER, -1..-1, -1..-1, -1)))
+    }
+
+    override fun getType(compiler: Compiler): Type = Type.UNKNOWN
+}
+
+class FuncDeclNode(func: Token,
+        val functionName: String,
+        val returnType: TypeNode,
+        endBracket: Token,
+        val params: List<TypedIdentifier>,
+        val statements: List<StatementNode>
+) : StatementNode("Function Declaration", func, endBracket, statements)
+
 abstract class ExpressionNode(name: String, tokenStart: Token, tokenEnd: Token, children: List<Node>) : Node(
     name, tokenStart, tokenEnd, children
 )
@@ -75,7 +96,7 @@ class AssignNode(val variableName: String,
     }
 }
 
-class VarDeclNode(val variableName: String,
+class VarDeclNode(val identifier: TypedIdentifier,
         val modifiers: Set<String>,
         val expression: ExpressionNode,
         tokenStart: Token,
