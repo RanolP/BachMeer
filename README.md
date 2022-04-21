@@ -1,5 +1,9 @@
 # BachMeer
 
+Abandoned. [RanolP/etherminal](https://github.com/RanolP/etherminal) would be the next one.
+
+# old readme begins here
+
 BachMeer: Shell Script Redefined
 
 ## How to read?
